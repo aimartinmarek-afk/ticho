@@ -272,6 +272,51 @@ const A = {
     this.burst({ type: 'highpass', f: 4000, v: 0.4, d: 0.25 });
     this.tone({ f: 4200, v: 0.025, a: 0.6, d: 6 }); // pískání v uších
   },
+  // výkřik k obličeji: kvílivý ženský hlas trhaný na kusy, pod ním hluboký řev a rána
+  faceScream(){
+    const ctx = this.ctx, t = ctx.currentTime;
+    this.amb.gain.cancelScheduledValues(t); this.amb.gain.setValueAtTime(0.0001, t); this.amb.gain.setTargetAtTime(1, t + 4, 1);
+    const pre = ctx.createGain(); pre.gain.value = 0.7;
+    const ws = ctx.createWaveShaper(); ws.curve = this.curve;
+    const gate = ctx.createGain(); gate.gain.value = 0.55;
+    const lfo = ctx.createOscillator(); lfo.type = 'square';
+    lfo.frequency.setValueAtTime(12, t); lfo.frequency.linearRampToValueAtTime(30, t + 2);
+    const lg = ctx.createGain(); lg.gain.value = 0.45; lfo.connect(lg); lg.connect(gate.gain);
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t); out.gain.exponentialRampToValueAtTime(0.9, t + 0.02);
+    out.gain.setValueAtTime(0.9, t + 1.4); out.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+    [1150, 1235, 1310, 620].forEach(f => {
+      const o = ctx.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f * 0.7, t); o.frequency.exponentialRampToValueAtTime(f * 1.25, t + 0.15); o.frequency.exponentialRampToValueAtTime(f * 0.85, t + 2.3);
+      const vib = ctx.createOscillator(); vib.frequency.value = rand(6, 8);
+      const vg = ctx.createGain(); vg.gain.value = f * 0.04; vib.connect(vg); vg.connect(o.frequency);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f * 1.1; bp.Q.value = 5;
+      o.connect(bp); bp.connect(pre); o.start(t); vib.start(t); o.stop(t + 2.5); vib.stop(t + 2.5);
+    });
+    pre.connect(ws); ws.connect(gate); gate.connect(out); this.out(out, null, 0.5);
+    lfo.start(t); lfo.stop(t + 2.5);
+    this.shriek({ v: 0.6, dur: 2.2, pitch: 0.45, lp: 1800, voices: 6, wet: 0.4 });
+    this.tone({ f: 65, f2: 20, v: 1, d: 1.6 });
+    this.tone({ type: 'square', f: 40, f2: 25, v: 0.4, d: 1 });
+    this.burst({ type: 'lowpass', f: 4000, v: 0.9, d: 0.8 });
+    this.burst({ type: 'highpass', f: 5000, v: 0.35, d: 0.4 });
+    this.tone({ f: 4200, v: 0.025, a: 0.6, d: 6 }); // pískání v uších
+  },
+  // stoupající disonantní smyčce, které se na konci utnou do ticha
+  riser(dur){
+    const ctx = this.ctx, t = ctx.currentTime;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(300, t); lp.frequency.exponentialRampToValueAtTime(3500, t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.14, t + dur); g.gain.setValueAtTime(0, t + dur);
+    [220, 233, 247, 1760, 1865].forEach(f => {
+      const o = ctx.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f * 1.06, t + dur);
+      const vib = ctx.createOscillator(); vib.frequency.value = rand(4, 7);
+      const vg = ctx.createGain(); vg.gain.value = f * 0.008; vib.connect(vg); vg.connect(o.frequency);
+      o.connect(lp); o.start(t); vib.start(t); o.stop(t + dur + 0.05); vib.stop(t + dur + 0.05);
+    });
+    lp.connect(g); this.out(g, null, 0.3);
+  },
   shotgun(){
     const ctx = this.ctx, t = ctx.currentTime;
     const s = this.src(this.noise), f = ctx.createBiquadFilter(); f.type = 'lowpass';
@@ -1139,8 +1184,8 @@ function showFace(style, dur = 1.9){
   G.faceStyle = style; G.lastFace = G.time;
   G.forceOff = 0; G.lampOff = 0;
   G.big = true; drawScareFace(1.4); scareCv.style.display = 'block';
-  G.scareT = G.scareDur = dur; G.shake = 2.5; $('flash').style.opacity = 1;
-  A.bigScream();
+  G.scareT = G.scareDur = dur; G.shake = 4; $('flash').style.opacity = 1;
+  A.faceScream();
   later(dur, () => { G.forceOff = 0.8; });
 }
 function jumpScare(){ showFace(pick([0, 1, 2]), 1.4); }
@@ -1160,6 +1205,7 @@ function bigScare(){
   at(6.0, () => A.heartbeat(0.2));
   // 2) baterka začne zlobit
   [[7, 0.06], [7.6, 0.1], [9, 0.05], [9.4, 0.18], [10.5, 0.08]].forEach(([s, d]) => at(s, () => { G.forceOff = d; A.click(); }));
+  at(7, () => A.riser(6.5)); // utne se přesně ve chvíli, kdy zhasne světlo
   at(8.2, () => A.whisper(around(1.5, true), 1.4, 0.18));
   at(11, () => A.heartbeat(0.3));
   at(11.9, () => A.heartbeat(0.35));
@@ -1611,14 +1657,20 @@ function ui(dt){
     const k = G.scareDur - G.scareT;
     if (G.big){ // obličej se překresluje, cuká sebou, otevírá tlamu a řítí se k tobě
       drawScareFace(1 + Math.sin(k * 30) * 0.25 + k * 0.4);
-      const j = 60 * Math.max(0.3, 1 - k);
-      scareCv.style.transform = `translate(${rand(-j, j)}px,${rand(-j, j)}px) scale(${Math.min(2.2, 0.9 + k * 2.5)}) rotate(${rand(-4, 4)}deg)`;
-      scareCv.style.filter = Math.random() < 0.15 ? 'invert(1)' : Math.random() < 0.3 ? 'contrast(2) saturate(3) hue-rotate(-20deg)' : '';
-      if (Math.random() < 0.2) $('flash').style.opacity = 0.6;
-      G.hurtT = 1;
+      // prudké škubání: velké skoky, rotace, občas se obraz natáhne nebo převrátí barvy
+      const j = 130 * Math.max(0.35, 1 - k * 0.6), r = 9 * Math.max(0.4, 1 - k * 0.5);
+      const sx = Math.random() < 0.12 ? rand(1.2, 1.6) : 1;
+      scareCv.style.transform = `translate(${rand(-j, j)}px,${rand(-j, j)}px) scale(${Math.min(2.4, 0.9 + k * 2.8) * sx},${Math.min(2.4, 0.9 + k * 2.8)}) rotate(${rand(-r, r)}deg)`;
+      scareCv.style.filter = Math.random() < 0.15 ? 'invert(1)' : Math.random() < 0.3 ? 'contrast(2) saturate(3) hue-rotate(-20deg)' : Math.random() < 0.15 ? 'blur(3px)' : '';
+      if (Math.random() < 0.25) $('flash').style.opacity = 0.7;
+      // trhané blikání obličeje
+      scareCv.style.visibility = Math.random() < 0.12 ? 'hidden' : 'visible';
+      // třese se i celý svět pod ním
+      canvas.style.transform = `translate(${rand(-25, 25)}px,${rand(-25, 25)}px) rotate(${rand(-2, 2)}deg)`;
+      G.hurtT = 1; G.shake = Math.max(G.shake, 2);
     } else scareCv.style.transform = `translate(${rand(-30, 30)}px,${rand(-30, 30)}px) scale(${1.1 + k * 0.6})`;
     scareCv.style.opacity = G.scareT > 0.15 ? 1 : G.scareT / 0.15;
-    if (G.scareT <= 0){ scareCv.style.display = 'none'; scareCv.style.filter = ''; G.big = false; }
+    if (G.scareT <= 0){ scareCv.style.display = 'none'; scareCv.style.filter = ''; scareCv.style.visibility = 'visible'; canvas.style.transform = ''; G.big = false; }
   }
   const f = $('flash'); f.style.opacity = Math.max(0, parseFloat(f.style.opacity || 0) - dt * 4);
   G.hurtT = Math.max(0, G.hurtT - dt * 0.8);
