@@ -16,6 +16,18 @@ Máš temný les, baterku, zbraně a opuštěnou chatu. Venku jsou příšery, k
 
 Hraj potmě a se sluchátky.
 
+## Cíl hry
+Rádio v chatě je rozbité. Najdi v lese čtyři součástky (u vraku auta, u hrobů, u studny a jednu někde jinde), oprav rádio na ponku a přivolej pomoc. Pak musíš 3 minuty vydržet, než helikoptéra přistane na mýtině severně od chaty. Doběhni k ní.
+
+## Zámek na dveřích
+Na začátku si nastavíš vzor jako na mobilu (spojíš aspoň 4 tečky). Když odejdeš, dveře chaty se za tebou zamknou. Až se budeš vracet, třeba s příšerou v zádech, musíš vzor nakreslit znovu. Po třech chybách musíš chvíli čekat.
+
+## Příšery
+- **Lovec**: plíží se k tobě a pak se rozběhne. Světlo ho zpomalí.
+- **Socha**: hýbe se, jen když se nedíváš.
+- **Běžec**: leze po čtyřech a je hodně rychlý.
+- **Žena**: sedí někde v lese a pláče. Najdi ji podle zvuku a obejdi ji potmě. Když na ni posvítíš, uděláš hluk nebo přijdeš moc blízko, ztichne… a pak se na tebe vrhne.
+
 ## Zbraně
 1. **Revolver**: spolehlivý na dálku.
 2. **Brokovnice**: zblízka roztrhá cokoli a odhodí to. Leží u vraku auta v lese, nebo ji vyrobíš na ponku.
