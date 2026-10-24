@@ -23,7 +23,10 @@ Rádio v chatě je rozbité. Najdi v lese čtyři součástky (u vraku auta, u h
 Na začátku si nastavíš vzor jako na mobilu (spojíš aspoň 4 tečky). Když odejdeš, dveře chaty se za tebou zamknou. Až se budeš vracet, třeba s příšerou v zádech, musíš vzor nakreslit znovu. Po třech chybách musíš chvíli čekat.
 
 ## Příšery
-- **Lovec**: plíží se k tobě a pak se rozběhne. Světlo ho zpomalí.
+- **Lovec**: přebíhá od stromu ke stromu a schovává se za kmeny, když se díváš. Pak se rozběhne.
+- **Číhač**: číhá za stromem před tebou a občas vykoukne. Když na něj posvítíš, přeběhne jinam. Když jdeš kolem a nedíváš se, vyrazí.
+- **Visák**: visí hlavou dolů v koruně stromu. Jediné varování je krev, která z něj kape na zem. Když jdeš pod ním, spadne na tebe. Když posvítíš nahoru, uteče.
+- **Napodobitel**: jde za tebou, jen když jdeš ty, a jeho kroky zní jako ozvěna tvých. Když zastavíš, zastaví taky.
 - **Socha**: hýbe se, jen když se nedíváš.
 - **Běžec**: leze po čtyřech a je hodně rychlý.
 - **Žena**: sedí někde v lese a pláče. Najdi ji podle zvuku a obejdi ji potmě. Když na ni posvítíš, uděláš hluk nebo přijdeš moc blízko, ztichne… a pak se na tebe vrhne.
@@ -35,7 +38,7 @@ Na začátku si nastavíš vzor jako na mobilu (spojíš aspoň 4 tečky). Když
 4. **Světlice**: hodíš ji a les zrudne. Lovci a běžci před ní utečou, socha v jejím světle ztuhne.
 
 ## Velká lekačka
-Přibližně v 80.–110. vteřině všechno pomalu ztichne, baterka začne zlobit a pak zhasne. Někdy to přijde hned ve tmě, jindy až chvíli potom, co se světlo vrátí. Potom se to opakuje zhruba každé 3–5 minut.
+Přibližně v 80.–110. vteřině všechno pomalu ztichne, baterka začne zlobit a pak zhasne. Když se světlo vrátí, stojí kousek před tebou příšera. Nebo se nic nestane… a o pár vteřin později uslyšíš dech za zády. Potom se to opakuje zhruba každé 3–5 minut. Občas se taky zvedne hustá mlha.
 Chceš ji načasovat pro kamaráda? Přidej do adresy `?lek=` a počet vteřin, třeba `index.html?lek=40`.
 
 ## Spuštění u sebe
