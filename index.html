@@ -14,6 +14,7 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;color:var(--ink);
 #grain{width:100%;height:100%;opacity:.05;image-rendering:pixelated;mix-blend-mode:screen}
 #vignette{background:radial-gradient(ellipse at center,rgba(0,0,0,0) 55%,rgba(0,0,0,.7) 100%)}
 #hurt{background:radial-gradient(ellipse at center,rgba(70,0,0,0) 25%,rgba(110,0,0,.95) 100%);opacity:0}
+#dirWarn{opacity:0}
 #redout{background:#8a0000;mix-blend-mode:multiply;opacity:0}
 #bloodCv{width:100%;height:100%;opacity:0;filter:blur(1px)}
 #flash{background:#fff;opacity:0}
@@ -65,6 +66,7 @@ button.up em{grid-row:1/3;grid-column:2;align-self:center;font-style:normal;colo
 <div class="layer"><canvas id="grain" width="192" height="108"></canvas></div>
 <div class="layer" id="vignette"></div>
 <div class="layer" id="redout"></div>
+<div class="layer" id="dirWarn"></div>
 <div class="layer" id="hurt"></div>
 <div class="layer"><canvas id="bloodCv"></canvas></div>
 <div class="layer" id="flash"></div>
@@ -544,7 +546,7 @@ renderer.setPixelRatio(1);
 const scene = new THREE.Scene();
 const FOG = 0x0b0d10;
 scene.background = new THREE.Color(FOG);
-scene.fog = new THREE.FogExp2(FOG, 0.05);
+scene.fog = new THREE.FogExp2(FOG, 0.044);
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 140);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
@@ -705,7 +707,7 @@ const heliLight = new THREE.PointLight(0xdde8ff, 0, 36, 1.2);
 
 // --- les (instancovaný)
 const trees = { pine: [], dead: [], rock: [] };
-for (let i = 0; i < 760; i++){
+for (let i = 0; i < 600; i++){
   const x = rr(-WORLD - 6, WORLD + 6), z = rr(-WORLD - 6, WORLD + 6);
   if (Math.hypot(x, z) < 10 || Math.hypot(x, z + 48) < 8) continue;
   if (Math.hypot(x + 30, z - 25) < 5 || Math.hypot(x - 35, z + 29) < 5 || Math.hypot(x - 20, z - 40) < 4) continue;
@@ -720,7 +722,7 @@ for (let i = 0; i < 70; i++){
 }
 // křoví: neblokuje cestu, ale zakrývá výhled – mezi ním jen něco prosvítá
 trees.bush = [];
-for (let i = 0; i < 380; i++){
+for (let i = 0; i < 220; i++){
   const x = rr(-WORLD - 4, WORLD + 4), z = rr(-WORLD - 4, WORLD + 4);
   if (Math.hypot(x, z) < 8 || Math.hypot(x, z + 48) < 8) continue;
   trees.bush.push({ x, z, s: rr(0.6, 1.5), ry: rr(0, 6.28) });
@@ -834,21 +836,21 @@ for (let i = 0; i < 2; i++){
 
 /* ================================================================ MONSTERS */
 const TYPES = {
-  lovec: { hp: 4, speed: 2.0, charge: true, chargeSpeed: 7.6, chargeDist: 11, litMul: 0.3, dmg: 30, h: 2.6, color: 0x5c564d, stride: 1.5, val: 1, pitch: 1, loop: 'breath' },
-  socha: { hp: 6, speed: 5.4, charge: false, litMul: 0, dmg: 40, h: 2.3, color: 0x55524c, stride: 99, val: 2, pitch: 0.7, loop: 'scrape' },
-  bezec: { hp: 2, speed: 3.2, charge: true, chargeSpeed: 9.5, chargeDist: 20, litMul: 0.6, dmg: 20, h: 2.0, color: 0x4f4640, stride: 0.9, val: 1, pitch: 1.5, loop: 'breath', crawl: true },
-  // sedí ve tmě a pláče; když ji vyrušíš světlem, hlukem nebo blízkostí, vrhne se na tebe
+  lovec: { hp: 4, speed: 2.0, charge: true, chargeSpeed: 6.2, chargeDist: 11, litMul: 0.3, dmg: 20, h: 2.6, color: 0x8f887c, stride: 1.5, val: 1, pitch: 1, loop: 'breath' },
+  socha: { hp: 6, speed: 4.2, charge: false, litMul: 0, dmg: 25, h: 2.3, color: 0x7c7973, stride: 99, val: 2, pitch: 0.7, loop: 'scrape' },
+  bezec: { hp: 2, speed: 3.2, charge: true, chargeSpeed: 7.2, chargeDist: 20, litMul: 0.6, dmg: 15, h: 2.0, color: 0x857a70, stride: 0.9, val: 1, pitch: 1.5, loop: 'breath', crawl: true },
   // číhá za kmenem u cesty, občas vykoukne; když jdeš kolem a nedíváš se, vyrazí
-  cihac: { hp: 3, speed: 2.5, charge: true, chargeSpeed: 10, chargeDist: 0, litMul: 0.5, dmg: 35, h: 2.3, color: 0x4a4540, stride: 1.2, val: 2, pitch: 1.2, loop: 'breath', mode: 'cihac' },
+  cihac: { hp: 3, speed: 2.5, charge: true, chargeSpeed: 7, chargeDist: 0, litMul: 0.5, dmg: 22, h: 2.3, color: 0x80786e, stride: 1.2, val: 2, pitch: 1.2, loop: 'breath', mode: 'cihac' },
   // visí hlavou dolů v koruně stromu, kape z něj krev; když jdeš pod ním, spadne na tebe
-  visak: { hp: 3, speed: 2.5, charge: true, chargeSpeed: 8, chargeDist: 0, litMul: 0.5, dmg: 30, h: 2.4, color: 0x46403a, stride: 1.2, val: 2, pitch: 1.4, loop: 'breath', mode: 'visak' },
+  visak: { hp: 3, speed: 2.5, charge: true, chargeSpeed: 6.5, chargeDist: 0, litMul: 0.5, dmg: 20, h: 2.4, color: 0x7a7268, stride: 1.2, val: 2, pitch: 1.4, loop: 'breath', mode: 'visak' },
   // jde za tebou jen když jdeš ty, jeho kroky zní jako ozvěna tvých
-  napo: { hp: 5, speed: 2.5, charge: true, chargeSpeed: 9, chargeDist: 0, litMul: 0.5, dmg: 35, h: 2.5, color: 0x3f3b37, stride: 1.4, val: 2, pitch: 0.9, loop: 'breath', mode: 'napo' },
-  zena: { hp: 8, speed: 3, charge: true, chargeSpeed: 9.5, chargeDist: 99, litMul: 1, dmg: 55, h: 1.3, color: 0x8d877c, stride: 0.8, val: 3, pitch: 1.7, loop: 'sob' },
+  napo: { hp: 5, speed: 2.5, charge: true, chargeSpeed: 6.5, chargeDist: 0, litMul: 0.5, dmg: 22, h: 2.5, color: 0x77716a, stride: 1.4, val: 2, pitch: 0.9, loop: 'breath', mode: 'napo' },
+  // sedí ve tmě a pláče; když ji vyrušíš světlem, hlukem nebo blízkostí, vrhne se na tebe
+  zena: { hp: 8, speed: 3, charge: true, chargeSpeed: 7.5, chargeDist: 99, litMul: 1, dmg: 35, h: 1.3, color: 0xb0aa9e, stride: 0.8, val: 3, pitch: 1.7, loop: 'sob' },
 };
 MAT.blood = new THREE.MeshLambertMaterial({ color: 0x5a0606, emissive: 0x1c0000 });
-MAT.bone = new THREE.MeshLambertMaterial({ color: 0x8e8572, flatShading: true });
-MAT.dress = new THREE.MeshLambertMaterial({ color: 0x77716a, flatShading: true, side: THREE.DoubleSide });
+MAT.bone = new THREE.MeshLambertMaterial({ color: 0xa89f8a, flatShading: true });
+MAT.dress = new THREE.MeshLambertMaterial({ color: 0x9a9488, flatShading: true, side: THREE.DoubleSide });
 MAT.hair = new THREE.MeshLambertMaterial({ color: 0x060505, side: THREE.DoubleSide });
 const GEO = {
   limb: new THREE.CylinderGeometry(0.055, 0.035, 1, 6),
@@ -857,7 +859,7 @@ const GEO = {
   head: new THREE.SphereGeometry(0.16, 8, 7),
   jaw: new THREE.BoxGeometry(0.15, 0.04, 0.13),
   socket: new THREE.SphereGeometry(0.045, 5, 4),
-  glint: new THREE.SphereGeometry(0.013, 4, 3),
+  glint: new THREE.SphereGeometry(0.02, 4, 3),
   rib: new THREE.TorusGeometry(0.16, 0.012, 3, 10, Math.PI),
   finger: new THREE.CylinderGeometry(0.012, 0.006, 1, 4),
   tooth: new THREE.ConeGeometry(0.011, 0.05, 3),
@@ -929,9 +931,10 @@ function buildMonster(type, mat){
   const neckJ = joint(chest, 0, H * 0.3, 0.02); seg(neckJ, H * 0.08, 0.7, mat); neckJ.rotation.x = Math.PI;
   const head = joint(chest, 0, H * 0.4, 0.06);
   const hm = new THREE.Mesh(GEO.head, mat); hm.scale.set(0.85, 1.25, 0.95); head.add(hm);
+  const eyeM = new THREE.MeshBasicMaterial({ color: 0xd8d2c0, fog: false });
   [-0.055, 0.055].forEach(x => {
     const s = new THREE.Mesh(GEO.socket, MAT.black); s.position.set(x, 0.05, 0.12); head.add(s);
-    const e = new THREE.Mesh(GEO.glint, MAT.eye); e.position.set(x, 0.05, 0.165); head.add(e);
+    const e = new THREE.Mesh(GEO.glint, eyeM); e.position.set(x, 0.05, 0.165); head.add(e);
     const tear = new THREE.Mesh(GEO.drip, MAT.blood); tear.scale.y = rand(0.06, 0.14); tear.position.set(x, 0.0 - tear.scale.y / 2, 0.15); head.add(tear);
   });
   const mouthIn = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.09, 0.04), MAT.black); mouthIn.position.set(0, -0.1, 0.11); head.add(mouthIn);
@@ -942,7 +945,7 @@ function buildMonster(type, mat){
   stain(jaw, 0, -0.03, 0.1, 0.06, 0.03, 0.04);
   head.rotation.z = type === 'socha' ? 0.6 : 0.35;
   if (t.crawl){ head.rotation.x = -crawlTilt; body.rotation.x = crawlTilt; body.position.set(0, 0.42, -H * 0.45); }
-  return { g, legL, legR, armL, armR, head, jaw, headBaseZ: head.rotation.z };
+  return { g, legL, legR, armL, armR, head, jaw, eyeM, headBaseZ: head.rotation.z };
 }
 // Žena: v bílých šatech, schoulená, dlouhé černé vlasy přes obličej, kostnaté ruce
 function buildWoman(mat){
@@ -1098,7 +1101,10 @@ class Monster {
     const frozen = this.type === 'socha' && ((inView && (lit || dist < 6)) || !!fl);
 
     this.cool -= dt; this.aggro = Math.max(0, this.aggro - dt); this.stag -= dt; this.flashT -= dt;
-    this.mat.emissive.setRGB(this.flashT > 0 ? 0.35 : 0, 0, 0);
+    // lehký vlastní jas, aby byla silueta vidět i mimo kužel baterky
+    if (this.flashT > 0) this.mat.emissive.setRGB(0.35, 0, 0); else this.mat.emissive.setRGB(0.03, 0.028, 0.026);
+    const angry = this.state === 'prep' || this.state === 'charge';
+    if (this.parts.eyeM) this.parts.eyeM.color.setHex(angry ? 0xff2a10 : 0xd8d2c0);
     const ap = { x: this.pos.x, y: 1.4, z: this.pos.z };
 
     if (this.type === 'zena' && !this.rage){
@@ -1131,7 +1137,8 @@ class Monster {
       if (lit) sp *= t.litMul;
       if (this.aggro > 0) sp *= 1.4;
       if (!P.safe && t.charge && this.cool <= 0 && dist < t.chargeDist && (lit || this.aggro > 0 || Math.random() < dt * 0.4)){
-        this.state = 'prep'; this.prepT = rand(0.6, 1.0); A.duck(1.8); // ticho před výkřikem
+        this.state = 'prep'; this.prepT = rand(1.0, 1.4); A.duck(1.8); // ticho, zavrčení… a pak výkřik
+        A.tone({ type: 'sawtooth', f: 70, f2: 48, v: 0.35, d: 0.9, pos: ap });
       }
     } else if (this.state === 'prep'){
       sp = 0; this.prepT -= dt;
@@ -1139,7 +1146,7 @@ class Monster {
     } else if (this.state === 'charge'){
       sp = t.chargeSpeed * (lit ? 0.7 : 1); this.chargeT += dt;
       const zena = this.type === 'zena';
-      if (this.chargeT > (zena ? 12 : 5) || dist > (zena ? 45 : 28) || P.safe){
+      if (this.chargeT > (zena ? 8 : 3.5) || dist > (zena ? 45 : 28) || P.safe){
         this.state = 'stalk'; this.cool = rand(7, 13);
         if (zena && !P.safe){ this.relocate(); this.calm(); } // zmizí a usedne jinde
         if (this.t.mode) this.reset(); // vrátí se k číhání
@@ -1247,7 +1254,10 @@ class Monster {
     p.legL.rotation.x = p.legL.userData.base + w; p.legR.rotation.x = p.legR.userData.base - w;
     p.armL.rotation.x = p.armL.userData.base - w * 0.6; p.armR.rotation.x = p.armR.userData.base + w * 0.6;
   }
-  lungeAt(){ this.special = false; this.mesh.rotation.set(0, 0, 0); this.mesh.position.y = 0; this.state = 'prep'; this.prepT = 0.08; G.shake += 0.4; }
+  lungeAt(){ // syknutí a chvilka na reakci
+    this.special = false; this.mesh.rotation.set(0, 0, 0); this.mesh.position.y = 0; this.state = 'prep'; this.prepT = 0.7; G.shake += 0.4;
+    A.hiss({ x: this.pos.x, y: 1.5, z: this.pos.z });
+  }
   updateSpecial(dt, dist, dx, dz, lit, ang, ap){
     const m = this.mesh, mode = this.t.mode;
     if (mode === 'cihac'){
@@ -1280,7 +1290,8 @@ class Monster {
       if (G.beam && up.ang < P.lightAngle * 0.9 && up.d < P.lightRange){
         if ((this.hideT += dt) > 0.5){ A.hiss({ x: this.pos.x, y: this.hangY, z: this.pos.z }); A.creak({ x: this.pos.x, y: this.hangY, z: this.pos.z }, 0.1); this.reset(); return; }
       } else this.hideT = 0;
-      if (dist < 2.6 && !P.safe){ A.snap(ap); A.shriek({ pos: ap, v: 0.5, dur: 0.6, pitch: 1.4, voices: 5 }); this.lungeAt(); this.prepT = 0.3; G.shake += 0.4; }
+      if (dist < 7 && (this.warnT = (this.warnT || 0) - dt) <= 0){ A.creak({ x: this.pos.x, y: this.hangY, z: this.pos.z }, 0.09); this.warnT = 2.5; } // vrzání nad hlavou
+      if (dist < 2.6 && !P.safe){ A.snap(ap); A.shriek({ pos: ap, v: 0.5, dur: 0.6, pitch: 1.4, voices: 5 }); this.lungeAt(); this.prepT = 0.9; G.shake += 0.4; }
       this.snd.set(this.pos.x, this.hangY - 1, this.pos.z, 0.1);
     } else if (mode === 'napo'){
       // jde jen když jdeš ty – míří těsně za tvoje záda; když stojíš, stojí taky
@@ -1292,6 +1303,7 @@ class Monster {
       }
       m.position.set(this.pos.x, 0, this.pos.z); m.rotation.y = Math.atan2(dx, dz);
       if (lit && dist < 20){ if ((this.hideT += dt) > 1.6){ A.hiss(ap); this.reset(); return; } } else this.hideT = 0;
+      if (dist < 5 && P.moving && (this.warnT = (this.warnT || 0) - dt) <= 0){ A.breath({ x: this.pos.x, y: 1.6, z: this.pos.z }, 0.18); this.warnT = 3; } // dýchá ti za zády
       if (dist < 1.6 && !P.safe && ang > 0.6) this.lungeAt();
       this.snd.set(ap.x, ap.y, ap.z, P.moving ? 0.05 : 0);
     }
@@ -1310,7 +1322,7 @@ class Monster {
 }
 
 // přízrak – jen pro lekačky, nedá se zabít
-const phantom = buildMonster('lovec', new THREE.MeshLambertMaterial({ color: 0x5e5850, flatShading: true })).g;
+const phantom = buildMonster('lovec', new THREE.MeshLambertMaterial({ color: 0x8a8478, flatShading: true })).g;
 phantom.visible = false; scene.add(phantom);
 
 // „pozorovatel“: přízrak, který reaguje na to, jestli se na něj díváš
@@ -1492,6 +1504,8 @@ function bigAmbush(behind){
 // Útok příšery: obrazovka zčervená, rozmaže se a třese, uši zalehnou, krev na obrazovce
 function hurtPlayer(n){
   if (!P.alive) return;
+  if (G.time < (G.invuln || 0)) return;
+  G.invuln = G.time + 2; G.lastHit = G.time;
   P.hp -= n; G.hurtT = 1.6; G.shake = 2; G.stress = 1;
   A.shriek({ v: 0.35, dur: 0.5, pitch: 0.8, voices: 4, wet: 0.2 });
   A.tone({ f: 80, f2: 30, v: 0.8, d: 0.35, pos: 'body' }); A.burst({ type: 'lowpass', f: 900, v: 0.6, d: 0.2, pos: 'body' });
@@ -1813,6 +1827,7 @@ function updatePlayer(dt){
     P.breathT = period * rand(0.9, 1.1);
   }
   if (P.safe && P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + 3 * dt);
+  else if (G.time - (G.lastHit ?? -99) > 8 && P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + 1.5 * dt);
   if (P.safe && !G.lastSafe && P.ess > 0 && !G.safeMsg){ G.safeMsg = true; showMsg('Na ponku jde z esence něco vyrobit. [E]'); }
   G.lastSafe = P.safe;
 
@@ -1864,9 +1879,9 @@ function update(dt){
     if (m.done){ m.remove(); monsters.splice(i, 1); }
     if (!P.alive) return;
   }
-  const maxM = G.rescue ? 9 : G.time < 30 ? 0 : Math.min(6, 1 + Math.floor(G.time / 120));
+  const maxM = G.rescue ? 7 : G.time < 30 ? 0 : Math.min(5, 1 + Math.floor(G.time / 150));
   G.spawnT -= dt;
-  if (G.spawnT <= 0 && monsters.length < maxM){ spawnMonster(); G.spawnT = G.rescue ? rand(3, 6) : rand(12, 24); }
+  if (G.spawnT <= 0 && monsters.length < maxM){ spawnMonster(); G.spawnT = G.rescue ? rand(4, 8) : rand(15, 28); }
 
   // sběr
   let near = null;
@@ -1908,7 +1923,16 @@ function update(dt){
   G.ambT -= dt; if (G.ambT <= 0){ ambientEvent(); G.ambT = rand(7, 18); }
   if (!G.bigDone && G.time >= G.bigAt && P.alive) bigScare();
   G.evT -= dt; if (G.evT <= 0){ scareEvent(); G.evT = rand(22, 55) * Math.max(0.5, 1 - G.time / 900); } // čím déle přežíváš, tím častěji
-  let nd = 99; monsters.forEach(m => { if (m.state !== 'dying' && !m.special) nd = Math.min(nd, m.dist); });
+  let nd = 99; monsters.forEach(m => { if (m.state !== 'dying') nd = Math.min(nd, m.dist + (m.special ? 6 : 0)); });
+  // odkud se něco žene: rudá záře na okraji obrazovky
+  let threat = null, td = 1e9;
+  monsters.forEach(m => { if ((m.state === 'charge' || m.state === 'prep') && m.dist < td){ td = m.dist; threat = m; } });
+  const dw = $('dirWarn');
+  if (threat && !P.safe){
+    const a = Math.atan2(-Math.sin(P.yaw), -Math.cos(P.yaw)) - Math.atan2(threat.pos.x - P.pos.x, threat.pos.z - P.pos.z);
+    dw.style.background = `radial-gradient(circle at ${50 + Math.sin(a) * 55}% ${50 - Math.cos(a) * 55}%, rgba(200,0,0,.6), rgba(200,0,0,0) 38%)`;
+    dw.style.opacity = clamp(1 - td / 25, 0.35, 1);
+  } else dw.style.opacity = 0;
   G.fear = clamp(1 - (nd - 2) / 18, 0, 1);
   G.hbT -= dt;
   if (G.fear > 0.08 && G.hbT <= 0){ A.heartbeat(G.fear); G.hbT = 1.05 - G.fear * 0.55; }
@@ -1985,7 +2009,7 @@ function updateFog(dt){
     else { G.fogTarget = 0; G.fogT = rand(90, 180); }
   }
   G.fogK += (G.fogTarget - G.fogK) * Math.min(1, dt * 0.12);
-  scene.fog.density = 0.05 + G.fogK * 0.07;
+  scene.fog.density = 0.044 + G.fogK * 0.055;
   scene.fog.color.copy(fogBase).lerp(fogMist, G.fogK * 0.8); scene.background.copy(scene.fog.color);
 }
 
