@@ -5,6 +5,28 @@ Máš temný les, baterku, zbraně a opuštěnou chatu. Venku jsou příšery, k
 
 **Hrát online:** https://aimartinmarek-afk.github.io/ticho/
 
+## Hra ve dvou (přes IP)
+Jeden z vás spustí server na svém počítači (potřebuje [Node.js](https://nodejs.org)):
+
+```
+node server.js
+```
+
+Server vypíše adresy, třeba:
+
+```
+Ty:        http://localhost:8080
+Kamarád:   http://192.168.1.5:8080
+```
+
+Oba otevřete svou adresu v prohlížeči a klikněte na **HRÁT VE DVOU**. Kdo klikne první, je hostitel.
+
+- Ve stejné síti (Wi-Fi) to funguje hned. Windows se může zeptat na povolení ve firewallu, potvrď ho.
+- Kamarád mimo tvou síť: na routeru přesměruj port 8080 na svůj počítač a pošli mu svou veřejnou IP.
+- Na GitHub Pages jde hrát jen sám, protože prohlížeč nedovolí stránce přes https připojit se k serveru přes IP.
+
+**Kompenzace za dva hráče:** víc příšer najednou, objevují se rychleji, mají o polovinu víc života a v lese je víc zásob. Když jeden z vás padne, leží v bezvědomí a druhý ho zvedne, když k němu přijde a chvíli u něj zůstane. Když padnete oba, je konec. Součástky do rádia sbíráte společně a stačí, když k helikoptéře doběhne jeden z vás.
+
 ## Ovládání
 - **WASD**: pohyb
 - **Myš**: rozhlížení

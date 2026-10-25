@@ -50,6 +50,9 @@ button.up em{grid-row:1/3;grid-column:2;align-self:center;font-style:normal;colo
 .btn{all:unset;cursor:pointer;margin-top:28px;padding:12px 34px;border:1px solid #4a433a;letter-spacing:4px;color:#cfc6b4}
 .btn:hover{background:#1a1713;border-color:#8a7f6e}
 .hidden{display:none!important}
+.modes{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+.btn:disabled{opacity:.4;cursor:default}
+.netMsg{font-size:14px;color:#a89f8a;min-height:1.6em}
 #pad{background:rgba(0,0,0,.55)}
 .padBox{display:flex;flex-direction:column;align-items:center;gap:12px;padding:22px 20px;background:rgba(10,9,8,.94);border:1px solid #2b2620;border-radius:26px;width:min(340px,calc(100vw - 32px));box-sizing:border-box}
 #padTitle{letter-spacing:4px;font-size:16px;color:#d8cfbd}
@@ -105,7 +108,11 @@ button.up em{grid-row:1/3;grid-column:2;align-self:center;font-style:normal;colo
     Světlo je zpomalí. Světlice je zažene. Chata je bezpečná.
   </div>
   <p style="font-size:13px;margin-top:18px">Hraj potmě a se sluchátky.</p>
-  <button class="btn" id="bStart">VSTOUPIT</button>
+  <div class="modes">
+    <button class="btn" id="bStart">HRÁT SÁM</button>
+    <button class="btn hidden" id="bDuo">HRÁT VE DVOU</button>
+  </div>
+  <p id="netMsg" class="netMsg"></p>
 </div>
 <div id="pause" class="screen hidden">
   <p>Něco tě sleduje i teď.</p>
@@ -136,7 +143,9 @@ const WORLD = 68, EYE = 1.65;
 
 /* ================================================================ AUDIO */
 const A = {
-  ctx: null,
+  ctx: null, live: 0,
+  // omezení počtu současně hrajících krátkých zvuků – při přetížení zvuk vypadával
+  voice(){ if (this.live > 56) return false; this.live++; return true; },
   init(){
     if (this.ctx) return;
     const ctx = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -179,9 +188,10 @@ const A = {
   },
   src(buf, loop){ const s = this.ctx.createBufferSource(); s.buffer = buf; s.loop = !!loop; return s; },
   setPos(p, x, y, z){ if (p.positionX){ p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z; } else p.setPosition(x, y, z); },
-  panner(pos){
+  panner(pos, hq){
     const p = this.ctx.createPanner();
-    p.panningModel = 'HRTF'; p.distanceModel = 'inverse'; p.refDistance = 1.5; p.rolloffFactor = 1.1; p.maxDistance = 200;
+    // HRTF jen pro pár trvalých zvuků (příšery); u stovek krátkých zvuků přetěžoval zvukové vlákno
+    p.panningModel = hq ? 'HRTF' : 'equalpower'; p.distanceModel = 'inverse'; p.refDistance = 1.5; p.rolloffFactor = 1.1; p.maxDistance = 200;
     this.setPos(p, pos.x, pos.y ?? 1.2, pos.z); return p;
   },
   out(node, pos, wet = 0){
@@ -204,21 +214,29 @@ const A = {
     g.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
   },
   burst(o){
+    if (!this.voice()) return;
     const ctx = this.ctx, t = o.t ?? ctx.currentTime, a = o.a || 0.005, d = o.d || 0.1;
     const s = this.src(this.noise), f = ctx.createBiquadFilter();
     f.type = o.type || 'bandpass'; f.frequency.value = o.f || 1000; f.Q.value = o.q || 1;
     const g = ctx.createGain(); this.env(g, t, a, o.v || 0.1, d);
     s.connect(f); f.connect(g); this.out(g, o.pos, o.wet || 0);
+    s.onended = () => this.live--;
     s.start(t, Math.random() * 1.5); s.stop(t + a + d + 0.05);
   },
   tone(o){
+    if (!this.voice()) return;
     const ctx = this.ctx, t = o.t ?? ctx.currentTime, a = o.a || 0.005, d = o.d || 0.2;
     const os = ctx.createOscillator(); os.type = o.type || 'sine';
     os.frequency.setValueAtTime(o.f, t);
     if (o.f2) os.frequency.exponentialRampToValueAtTime(o.f2, t + a + d);
     const g = ctx.createGain(); this.env(g, t, a, o.v || 0.1, d);
     os.connect(g); this.out(g, o.pos, o.wet || 0);
+    os.onended = () => this.live--;
     os.start(t); os.stop(t + a + d + 0.05);
+  },
+  remoteShot(pos, big){ // výstřel kamaráda
+    this.burst({ type: 'lowpass', f: big ? 2500 : 3500, v: big ? 1 : 0.8, d: big ? 0.5 : 0.3, pos, wet: 0.9 });
+    this.tone({ f: 120, f2: 35, v: 0.6, d: 0.25, pos });
   },
 
   step(wood, run){
@@ -263,6 +281,7 @@ const A = {
     this.burst({ t: t + 0.95, f: 480, q: 1, a: 0.25, v: vol * 0.8, d: 0.7, pos, wet: 0.1 });
   },
   shriek({ pos = null, v = 0.4, dur = 1.2, pitch = 1, lp = 4000, voices = 5, wet = 0.4 } = {}){
+    if (!this.voice()) return;
     const ctx = this.ctx, t = ctx.currentTime;
     const pre = ctx.createGain(); pre.gain.value = 0.5;
     const ws = ctx.createWaveShaper(); ws.curve = this.curve;
@@ -282,7 +301,8 @@ const A = {
       o.connect(pre); vib.start(t); o.start(t); vib.stop(t + dur); o.stop(t + dur + 0.05);
     }
     const n = this.src(this.noise), nb = ctx.createBiquadFilter(); nb.type = 'bandpass'; nb.frequency.value = 2500 * pitch; nb.Q.value = 0.8;
-    const ng = ctx.createGain(); ng.gain.value = 0.6; n.connect(nb); nb.connect(ng); ng.connect(pre); n.start(t); n.stop(t + dur);
+    const ng = ctx.createGain(); ng.gain.value = 0.6; n.connect(nb); nb.connect(ng); ng.connect(pre);
+    n.onended = () => this.live--; n.start(t); n.stop(t + dur);
     pre.connect(ws); ws.connect(hp); hp.connect(lpf); lpf.connect(g); this.out(g, pos, wet);
   },
   jumpScream(){
@@ -327,7 +347,7 @@ const A = {
     const ctx = this.ctx, s = this.src(this.noise, true), f = ctx.createBiquadFilter();
     f.type = 'highpass'; f.frequency.value = 2500;
     const g = ctx.createGain(); g.gain.value = 0.06;
-    const p = this.panner({ x: 0, y: 0, z: 0 });
+    const p = this.panner({ x: 0, y: 0, z: 0 }, true);
     s.connect(f); f.connect(g); g.connect(p); p.connect(this.sfx); s.start();
     return { pos: (x, y, z) => this.setPos(p, x, y, z), stop: () => { try { s.stop(); g.disconnect(); } catch (e) {} } };
   },
@@ -413,7 +433,7 @@ const A = {
   // pláč ženy: vzlyky a dlouhé naříkání
   sobLoop(){
     const ctx = this.ctx, g = ctx.createGain(); g.gain.value = 0;
-    const p = this.panner({ x: 0, y: 1, z: 0 }); g.connect(p); p.connect(this.sfx);
+    const p = this.panner({ x: 0, y: 1, z: 0 }, true); g.connect(p); p.connect(this.sfx);
     const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 330;
     const vib = ctx.createOscillator(); vib.frequency.value = 5.5;
     const vg = ctx.createGain(); vg.gain.value = 14; vib.connect(vg); vg.connect(o.frequency);
@@ -515,7 +535,7 @@ const A = {
   monsterLoop(kind, pitch){
     const ctx = this.ctx, scrape = kind === 'scrape';
     const g = ctx.createGain(); g.gain.value = 0;
-    const p = this.panner({ x: 0, y: 1, z: 0 }); g.connect(p); p.connect(this.sfx);
+    const p = this.panner({ x: 0, y: 1, z: 0 }, true); g.connect(p); p.connect(this.sfx);
     const n = this.src(this.noise, true);
     const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = scrape ? 1100 : 420 * pitch; bp.Q.value = scrape ? 6 : 1.5;
     const am = ctx.createGain(); am.gain.value = 0.5;
@@ -662,7 +682,8 @@ doorLed.position.set(1.02, 1.25, 0.05); doorPivot.add(doorLed);
 scene.add(doorPivot); rayBlock.push(doorMesh);
 function updateDoor(dt){
   const out = P.pos.z > 3.1, far = Math.hypot(P.pos.x, P.pos.z - 3) > 5;
-  if (D.open && D.code && out && far){ // zamkne se za tebou
+  const rOut = !NET.remote || (NET.remote.z > 3.1 && Math.hypot(NET.remote.x, NET.remote.z - 3) > 5);
+  if (!isClient() && D.open && D.code && out && far && rOut){ // zamkne se za vámi
     D.open = false; A.unlock({ x: 0, y: 1.2, z: 3 }); A.creak({ x: 0, y: 1.5, z: 3 }, 0.08);
     if (!D.lockedOnce){ D.lockedOnce = true; showMsg('Dveře chaty se za tebou zamkly.'); }
   }
@@ -1062,7 +1083,7 @@ const monsters = [];
 const tmpV = new THREE.Vector3(), camFwd = new THREE.Vector3();
 class Monster {
   constructor(type){
-    this.type = type; this.t = TYPES[type]; this.hp = this.t.hp;
+    this.type = type; this.t = TYPES[type]; this.hp = this.t.hp * (isMP() ? 1.5 : 1); this.id = NET.nextId++;
     this.pos = new THREE.Vector3(); this.relocate();
     this.mat = new THREE.MeshLambertMaterial({ color: this.t.color, flatShading: true, emissive: 0x000000 });
     this.parts = buildMonster(type, this.mat); this.mesh = this.parts.g; this.mesh.userData.mon = this; scene.add(this.mesh);
@@ -1389,7 +1410,7 @@ const PGEO = {
 };
 PGEO.part = [new THREE.BoxGeometry(0.2, 0.08, 0.14), new THREE.MeshLambertMaterial({ color: 0x1d3a22, emissive: 0x061a0a })];
 const PICK_SND = { shells: 'ammo', shotgun: 'ammo', flare: 'bat', part: 'ammo' };
-function addPickup(kind, x, z, y){
+function addPickup(kind, x, z, y, uid){
   const [g, m] = PGEO[kind], mesh = new THREE.Mesh(g, m);
   const base = y ?? (kind === 'ess' ? 0.6 : kind === 'note' ? 0.02 : 0.08);
   mesh.position.set(x, base, z);
@@ -1397,7 +1418,27 @@ function addPickup(kind, x, z, y){
   if (kind === 'shotgun' || kind === 'shells') mesh.rotation.y = rand(0, 6);
   if (kind === 'note') mesh.rotation.set(-Math.PI / 2, 0, rand(0, 6));
   if (kind === 'ammo') mesh.rotation.y = rand(0, 6);
-  scene.add(mesh); pickups.push({ kind, mesh, x, z, base, ph: rand(0, 6) });
+  uid = uid ?? NET.nextPid++;
+  scene.add(mesh); pickups.push({ uid, kind, mesh, x, z, base, ph: rand(0, 6) });
+  if (isHost() && NET.ready) send({ t: 'pa', p: [uid, kind, x, z, base] });
+}
+function applyPickup(kind){
+  if (kind === 'bat'){ P.bat = Math.min(P.maxBat, P.bat + 40); showMsg('Baterie', 1.5); }
+  if (kind === 'ammo'){ P.ammo += 6; showMsg('Náboje', 1.5); }
+  if (kind === 'ess'){ P.ess++; showMsg('✦ Esence', 1.5); }
+  if (kind === 'shells'){ P.shells += 4; showMsg(P.owned.shotgun ? 'Broky' : 'Broky. Chce to brokovnici.', 1.8); }
+  if (kind === 'flare'){ P.flares++; showMsg('Světlice  [4]', 1.5); }
+  if (kind === 'shotgun') giveShotgun();
+  if (kind === 'part'){ // součástky jsou společné; u druhého hráče je počítá hostitel
+    if (!isClient()) P.parts++;
+    const n = isClient() ? P.parts + 1 : P.parts;
+    showMsg(n < 4 ? `Součástka do rádia ${n}/4` : 'Máme všechny součástky. Zpátky do chaty k rádiu.', 4);
+  }
+  A.pickup(PICK_SND[kind] || kind);
+}
+function removePickup(uid){
+  const i = pickups.findIndex(p => p.uid === uid); if (i < 0) return null;
+  const p = pickups[i]; scene.remove(p.mesh); pickups.splice(i, 1); return p;
 }
 function freeSpot(minR = 8, far = 0){
   for (let i = 0; i < 80; i++){
@@ -1495,15 +1536,15 @@ function bigScare(){
 function bigAmbush(behind){
   G.forceOff = 0; G.lampOff = 0; G.tension = 0;
   if (P.safe){ A.knock(wallPos()); later(0.9, () => A.knock(wallPos())); A.sting(0.2); return; } // v chatě buší na stěny
-  const m = new Monster(Math.random() < 0.6 ? 'lovec' : 'bezec'), d = behind ? 4 : 3, k = behind ? 1 : -1;
-  m.pos.set(P.pos.x + Math.sin(P.yaw) * d * k, 0, P.pos.z + Math.cos(P.yaw) * d * k); collide(m.pos, 0.4, MON_BOX);
-  m.state = 'prep'; m.prepT = behind ? 0.6 : 0.3; monsters.push(m);
-  if (behind) A.breath({ x: m.pos.x, y: 1.6, z: m.pos.z }, 0.3); else { A.sting(0.3); G.shake += 0.6; }
+  const d = behind ? 4 : 3, k = behind ? 1 : -1, x = P.pos.x + Math.sin(P.yaw) * d * k, z = P.pos.z + Math.cos(P.yaw) * d * k;
+  spawnAt(Math.random() < 0.6 ? 'lovec' : 'bezec', x, z, behind ? 0.6 : 0.3);
+  if (behind) A.breath({ x, y: 1.6, z }, 0.3); else { A.sting(0.3); G.shake += 0.6; }
 }
 
 // Útok příšery: obrazovka zčervená, rozmaže se a třese, uši zalehnou, krev na obrazovce
 function hurtPlayer(n){
-  if (!P.alive) return;
+  if (NET.ctxRemote){ send({ t: 'hurt', n }); return; } // útok na kamaráda – zpracuje si ho sám
+  if (!P.alive || P.down) return;
   if (G.time < (G.invuln || 0)) return;
   G.invuln = G.time + 2; G.lastHit = G.time;
   P.hp -= n; G.hurtT = 1.6; G.shake = 2; G.stress = 1;
@@ -1511,7 +1552,12 @@ function hurtPlayer(n){
   A.tone({ f: 80, f2: 30, v: 0.8, d: 0.35, pos: 'body' }); A.burst({ type: 'lowpass', f: 900, v: 0.6, d: 0.2, pos: 'body' });
   A.muffle(4); A.heartbeat(1); A.tone({ f: 3900, v: 0.02, a: 0.3, d: 3, pos: 'body' });
   screenBlood(); G.forceOff = 0.25;
-  if (P.hp <= 0){ P.hp = 0; die(); }
+  if (P.hp <= 0){ P.hp = 0; if (isMP() && NET.remote && !NET.remote.down) goDown(); else die(); }
+}
+// ve dvou: místo smrti bezvědomí, kamarád tě může zvednout
+function goDown(){
+  P.down = true; P.hp = 0; G.stress = 1.2; A.muffle(6); A.chase(0);
+  showMsg('Ležíš v bezvědomí. Kamarád tě zvedne, když k tobě přijde.', 8);
 }
 const bloodCv = $('bloodCv'), bctx = bloodCv.getContext('2d');
 bloodCv.width = 480; bloodCv.height = 270;
@@ -1527,13 +1573,16 @@ function screenBlood(){
   G.bloodA = 1;
 }
 function die(){
+  if (!P.alive) return;
+  if (isMP() && !G.overSent){ G.overSent = true; send({ t: 'over' }); }
   P.alive = false; G.state = 'dead'; G.stress = 1.6; G.hurtT = 2; screenBlood(); A.muffle(8);
   monsters.forEach(m => m.snd.stop()); A.duck(9999); A.chase(0); window.speechSynthesis && speechSynthesis.cancel();
   setTimeout(() => $('fade').style.opacity = 1, 800);
   setTimeout(() => {
     document.exitPointerLock();
     const s = Math.floor(G.time), mm = Math.floor(s / 60), ss = String(s % 60).padStart(2, '0');
-    $('deadStats').innerHTML = `Přežil jsi ${mm}:${ss}<br>Zabitých příšer: ${P.kills} · Nalezené poznámky: ${P.notes}/${NOTES.length}`;
+    if (isMP()) $('dead').querySelector('h1').textContent = 'LES SI VÁS VZAL';
+    $('deadStats').innerHTML = `${isMP() ? 'Vydrželi jste' : 'Přežil jsi'} ${mm}:${ss}<br>Zabitých příšer: ${P.kills} · Nalezené poznámky: ${P.notes}/${NOTES.length}`;
     $('dead').classList.remove('hidden');
   }, 2600);
 }
@@ -1639,9 +1688,7 @@ function scareEvent(){
       A.duck(4);
       later(1.6, () => {
         if (P.safe || !P.alive) return;
-        const m = new Monster(Math.random() < 0.6 ? 'lovec' : 'bezec');
-        m.pos.set(P.pos.x + Math.sin(P.yaw) * 7, 0, P.pos.z + Math.cos(P.yaw) * 7); collide(m.pos, 0.4, MON_BOX);
-        m.state = 'prep'; m.prepT = 0.05; monsters.push(m);
+        spawnAt(Math.random() < 0.6 ? 'lovec' : 'bezec', P.pos.x + Math.sin(P.yaw) * 7, P.pos.z + Math.cos(P.yaw) * 7, 0.05);
         G.shake += 0.4;
       });
       break;
@@ -1690,7 +1737,16 @@ function scareEvent(){
   }
 }
 
-function spawnMonster(){
+// příšera přesně na místě (u druhého hráče ji vytvoří hostitel)
+function spawnAt(type, x, z, prepT){
+  if (isClient()){ send({ t: 'spawn', type, x, z, prepT }); return; }
+  const m = new Monster(type); m.pos.set(x, 0, z); collide(m.pos, 0.4, MON_BOX);
+  m.state = 'prep'; m.prepT = prepT; monsters.push(m);
+}
+function spawnMonster(){ // ve dvou se příšery objevují u obou hráčů
+  if (isHost() && NET.remote && Math.random() < 0.5) asRemote(spawnOne); else spawnOne();
+}
+function spawnOne(){
   const pool = ['lovec', 'lovec', 'lovec'];
   if (G.time > 150 && monsters.filter(m => m.type === 'socha').length < 2) pool.push('socha', 'socha');
   if (G.time > 300) pool.push('bezec', 'bezec');
@@ -1702,7 +1758,10 @@ function spawnMonster(){
   if (m.type === 'zena'){ const s = freeSpot(20, 22); m.pos.set(s.x, 0, s.z); } // sedí kdekoli v lese
   monsters.push(m);
 }
-function alertMonsters(r){ monsters.forEach(m => { if (m.dist < r) m.aggro = 4; }); }
+function alertMonsters(r, x = P.pos.x, z = P.pos.z){
+  if (isClient()){ if (G.time - NET.alertT > 0.4){ NET.alertT = G.time; send({ t: 'alert', r, x, z }); } return; }
+  monsters.forEach(m => { if (Math.hypot(m.pos.x - x, m.pos.z - z) < r) m.aggro = 4; });
+}
 
 /* ================================================================ PLAYER */
 const ray = new THREE.Raycaster();
@@ -1726,21 +1785,30 @@ function cycleWeapon(dir){
 // první zásah paprskem; stromy a stěny chaty kryjí
 function rayHit(dir, far){
   ray.set(camera.position, dir); ray.far = far;
-  const live = monsters.filter(m => m.state !== 'dying');
+  const live = foes().filter(m => m.state !== 'dying');
   const hits = ray.intersectObjects(live.map(m => m.mesh).concat(rayBlock), true);
   if (!hits.length) return null;
-  let o = hits[0].object; while (o && !o.userData.mon) o = o.parent;
-  return o ? o.userData.mon : null;
+  let o = hits[0].object; while (o && !o.userData.mon && o.userData.pid == null) o = o.parent;
+  if (!o) return null;
+  return o.userData.mon || proxy(NET.puppets.get(o.userData.pid));
 }
 function throwFlare(){
+  const o = camera.position.clone().addScaledVector(camFwd, 0.6), v = camFwd.clone().multiplyScalar(11); v.y += 3.5;
+  A.burst({ f: 3000, v: 0.25, d: 0.4 });
+  if (isClient()){ send({ t: 'flare', p: [o.x, o.y, o.z], v: [v.x, v.y, v.z] }); return; } // světlice řídí hostitel
+  throwFlareAt(o, v);
+}
+function throwFlareAt(o, v){
   const f = flares.find(f => f.life <= 0) || flares.reduce((a, b) => a.life < b.life ? a : b);
   if (f.snd) f.snd.stop();
-  f.mesh.position.copy(camera.position).addScaledVector(camFwd, 0.6);
-  f.vel.copy(camFwd).multiplyScalar(11); f.vel.y += 3.5;
+  f.mesh.position.copy(o); f.vel.copy(v);
   f.life = 25; f.mesh.visible = true; f.snd = A.flareLoop();
-  A.burst({ f: 3000, v: 0.25, d: 0.4 });
 }
 function updateFlares(dt){
+  if (isClient()){ // druhý hráč jen zobrazuje světlice od hostitele
+    flares.forEach(f => { f.light.intensity = f.life > 0 ? (f.life < 3 ? f.life / 3 : 1) * rand(2.4, 3.2) : 0; });
+    return;
+  }
   for (const f of flares){
     if (f.life <= 0) continue;
     f.life -= dt;
@@ -1755,20 +1823,20 @@ function updateFlares(dt){
   }
 }
 function shoot(){
-  if (G.shootCD > 0 || !P.alive || G.note) return;
+  if (G.shootCD > 0 || !P.alive || G.note || P.down) return;
   const w = P.weapon;
   G.shootCD = WEAPONS[w].cd;
   if (w === 'revolver'){
     if (P.ammo <= 0){ A.empty(); showMsg('Žádné náboje.', 1.5); return; }
     P.ammo--; A.gun(); G.recoil = 1; muzzle.intensity = 6; G.muzzleT = 0.06; G.shake += 0.25;
     $('flash').style.opacity = 0.12;
-    alertMonsters(35);
+    alertMonsters(35); send({ t: 'shot', w });
     const m = rayHit(camFwd, 45); if (m) m.hit(P.dmg);
   } else if (w === 'shotgun'){
     if (P.shells <= 0){ A.empty(); showMsg('Žádné broky.', 1.5); return; }
     P.shells--; A.shotgun(); G.recoil = 1.8; muzzle.intensity = 12; G.muzzleT = 0.09; G.shake += 0.7;
     $('flash').style.opacity = 0.3;
-    alertMonsters(45);
+    alertMonsters(45); send({ t: 'shot', w });
     const dmg = new Map();
     for (let i = 0; i < 8; i++){
       const dir = camFwd.clone().add(new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(0.09)).normalize();
@@ -1779,12 +1847,14 @@ function shoot(){
     A.swing(); G.swingT = 0.35;
     later(0.12, () => {
       let best = null;
-      for (const m of monsters){
-        if (m.state === 'dying' || m.dist > 2.7) continue;
+      let bd = 1e9;
+      for (const m of foes()){
         const dx = m.pos.x - P.pos.x, dz = m.pos.z - P.pos.z, l = Math.hypot(dx, dz) || 1;
+        if (m.state === 'dying' || l > 2.7) continue;
         if ((dx * camFwd.x + dz * camFwd.z) / l < 0.55) continue;
-        if (!best || m.dist < best.dist) best = m;
+        if (l < bd){ bd = l; best = m; }
       }
+      if (best && !best.hit) best = proxy(best);
       if (best){ best.hit(P.axeDmg); best.knock(1.2); A.chop({ x: best.pos.x, y: 1.3, z: best.pos.z }); G.shake += 0.35; }
     });
   } else if (w === 'flare'){
@@ -1795,6 +1865,11 @@ function shoot(){
 }
 
 function updatePlayer(dt){
+  if (P.down){ // v bezvědomí: ležíš na zemi a nemůžeš nic dělat
+    P.moving = false; P.speed = 0;
+    camera.position.set(P.pos.x, 0.35, P.pos.z); camera.rotation.set(P.pitch * 0.3, P.yaw, 0.5);
+    G.stress = Math.max(G.stress || 0, 0.8); return;
+  }
   const mz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), mx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   const sy = Math.sin(P.yaw), cy = Math.cos(P.yaw);
   let vx = -sy * mz + cy * mx, vz = -cy * mz - sy * mx; const l = Math.hypot(vx, vz);
@@ -1815,7 +1890,7 @@ function updatePlayer(dt){
     if (P.stepAcc > (run ? 2.1 : 1.6)){
       P.stepAcc = 0; A.step(P.safe, run);
       // napodobitel: tvoje kroky mají ozvěnu
-      monsters.forEach(m => { if (m.special && m.t.mode === 'napo' && m.dist < 40) later(0.11, () => A.mstep({ x: m.pos.x, y: 0.3, z: m.pos.z }, false, 0.8)); });
+      foes().forEach(m => { if (m.special && m.t.mode === 'napo' && m.dist < 40) later(0.11, () => A.mstep({ x: m.pos.x, y: 0.3, z: m.pos.z }, false, 0.8)); });
     }
   }
   // vlastní dech: v klidu skoro neslyšný, při běhu, strachu a zranění rychlý, hlasitý a roztřesený
@@ -1874,14 +1949,19 @@ function update(dt){
   camera.getWorldDirection(camFwd);
   updateWatch(dt); updateEyes(dt); updateFlares(dt); updateHanged(dt); updateBlood(dt);
 
+  netTick(dt); updateMate(dt); if (isClient()) updatePuppets(dt);
   for (let i = monsters.length - 1; i >= 0; i--){
-    const m = monsters[i]; m.update(dt);
+    const m = monsters[i], r = NET.remote;
+    // míří na bližšího hráče, který není v bezvědomí
+    const useR = isHost() && r && !r.down && (P.down || Math.hypot(m.pos.x - r.x, m.pos.z - r.z) < Math.hypot(m.pos.x - P.pos.x, m.pos.z - P.pos.z));
+    if (useR) asRemote(() => m.update(dt)); else m.update(dt);
     if (m.done){ m.remove(); monsters.splice(i, 1); }
     if (!P.alive) return;
   }
-  const maxM = G.rescue ? 7 : G.time < 30 ? 0 : Math.min(5, 1 + Math.floor(G.time / 150));
+  // kompenzace za dva hráče: víc příšer a rychleji
+  const duo = isMP(), maxM = G.rescue ? (duo ? 10 : 7) : G.time < 30 ? 0 : Math.min(duo ? 8 : 5, Math.round((1 + Math.floor(G.time / 150)) * (duo ? 1.6 : 1)));
   G.spawnT -= dt;
-  if (G.spawnT <= 0 && monsters.length < maxM){ spawnMonster(); G.spawnT = G.rescue ? rand(4, 8) : rand(15, 28); }
+  if (!isClient() && G.spawnT <= 0 && monsters.length < maxM){ spawnMonster(); G.spawnT = (G.rescue ? rand(4, 8) : rand(15, 28)) * (duo ? 0.75 : 1); }
 
   // sběr
   let near = null;
@@ -1889,22 +1969,16 @@ function update(dt){
     const p = pickups[i], d = Math.hypot(p.x - P.pos.x, p.z - P.pos.z);
     if (p.kind === 'ess'){ p.ph += dt * 2; p.mesh.position.y = p.base + Math.sin(p.ph) * 0.1; }
     if (p.kind === 'note'){ if (d < 1.9 && !p.read) near = p; continue; }
-    if (d < 1.2){
-      if (p.kind === 'bat'){ if (P.bat >= P.maxBat - 1) continue; P.bat = Math.min(P.maxBat, P.bat + 40); showMsg('Baterie', 1.5); }
-      if (p.kind === 'ammo'){ P.ammo += 6; showMsg('Náboje', 1.5); }
-      if (p.kind === 'ess'){ P.ess++; showMsg('✦ Esence', 1.5); }
-      if (p.kind === 'shells'){ P.shells += 4; showMsg(P.owned.shotgun ? 'Broky' : 'Broky. Chce to brokovnici.', 1.8); }
-      if (p.kind === 'flare'){ P.flares++; showMsg('Světlice  [4]', 1.5); }
-      if (p.kind === 'shotgun') giveShotgun();
-      if (p.kind === 'part'){
-        P.parts++;
-        showMsg(P.parts < 4 ? `Součástka do rádia ${P.parts}/4` : 'Mám všechny součástky. Zpátky do chaty k rádiu.', 4);
-      }
-      A.pickup(PICK_SND[p.kind] || p.kind); scene.remove(p.mesh); pickups.splice(i, 1);
+    if (d < 1.2 && !P.down){
+      if (p.kind === 'bat' && P.bat >= P.maxBat - 1) continue;
+      // ve dvou o věcech rozhoduje hostitel, ať je nevezmou oba
+      if (isClient()){ if (!p.asked){ p.asked = true; send({ t: 'take', uid: p.uid }); } continue; }
+      applyPickup(p.kind); scene.remove(p.mesh); pickups.splice(i, 1);
+      send({ t: 'pr', uid: p.uid });
     }
   }
   G.resT -= dt;
-  if (G.resT <= 0){
+  if (!isClient() && G.resT <= 0){
     G.resT = 25;
     if (pickups.filter(p => p.kind === 'bat').length < 12){ const s = freeSpot(10, 25); addPickup('bat', s.x, s.z); }
     if (pickups.filter(p => p.kind === 'ammo').length < 10){ const s = freeSpot(10, 25); addPickup('ammo', s.x, s.z); }
@@ -1918,15 +1992,23 @@ function update(dt){
   G.near = near; G.atBench = atBench; G.atRadio = atRadio; G.atDoor = atDoor;
   $('prompt').textContent = G.note || G.pad ? '' : atDoor ? '[E] ODEMKNOUT DVEŘE' : near ? '[E] ČÍST' : atRadio ? '[E] OPRAVIT RÁDIO' : atBench ? '[E] PONK – VYLEPŠENÍ' : '';
   updateDoor(dt); updateRescue(dt); updateFog(dt);
+  // ve dvou: přijdi ke kamarádovi v bezvědomí a zvedni ho
+  if (isMP() && NET.remote && NET.remote.down && !P.down){
+    const d = Math.hypot(NET.remote.x - P.pos.x, NET.remote.z - P.pos.z);
+    G.reviveT = d < 2.2 ? (G.reviveT || 0) + dt : 0;
+    if (G.reviveT > 0) $('prompt').textContent = `ZVEDÁŠ KAMARÁDA… ${Math.min(100, Math.floor(G.reviveT / 3 * 100))} %`;
+    if (G.reviveT >= 3){ G.reviveT = 0; NET.remote.down = false; send({ t: 'revive' }); showMsg('Zvedl jsi kamaráda.', 2); }
+  }
+  if (isHost() && P.down && NET.remote && NET.remote.down) die(); // oba leží → konec
 
   // zvuky a lekačky
   G.ambT -= dt; if (G.ambT <= 0){ ambientEvent(); G.ambT = rand(7, 18); }
   if (!G.bigDone && G.time >= G.bigAt && P.alive) bigScare();
   G.evT -= dt; if (G.evT <= 0){ scareEvent(); G.evT = rand(22, 55) * Math.max(0.5, 1 - G.time / 900); } // čím déle přežíváš, tím častěji
-  let nd = 99; monsters.forEach(m => { if (m.state !== 'dying') nd = Math.min(nd, m.dist + (m.special ? 6 : 0)); });
+  let nd = 99; foes().forEach(m => { if (m.state !== 'dying') nd = Math.min(nd, Math.hypot(m.pos.x - P.pos.x, m.pos.z - P.pos.z) + (m.special ? 6 : 0)); });
   // odkud se něco žene: rudá záře na okraji obrazovky
   let threat = null, td = 1e9;
-  monsters.forEach(m => { if ((m.state === 'charge' || m.state === 'prep') && m.dist < td){ td = m.dist; threat = m; } });
+  foes().forEach(m => { const d = Math.hypot(m.pos.x - P.pos.x, m.pos.z - P.pos.z); if ((m.state === 'charge' || m.state === 'prep') && d < td){ td = d; threat = m; } });
   const dw = $('dirWarn');
   if (threat && !P.safe){
     const a = Math.atan2(-Math.sin(P.yaw), -Math.cos(P.yaw)) - Math.atan2(threat.pos.x - P.pos.x, threat.pos.z - P.pos.z);
@@ -1937,7 +2019,7 @@ function update(dt){
   G.hbT -= dt;
   if (G.fear > 0.08 && G.hbT <= 0){ A.heartbeat(G.fear); G.hbT = 1.05 - G.fear * 0.55; }
   // když se něco žene na hráče, rozječí se panická hudba
-  const chasing = monsters.some(m => m.state === 'charge');
+  const chasing = foes().some(m => m.state === 'charge');
   if (chasing !== G.chasing){ G.chasing = chasing; A.chase(chasing ? 0.07 : 0); }
   // ve tmě venku to začne šeptat a dýchat čím dál blíž
   G.darkT = (!G.beam && !P.safe) ? (G.darkT || 0) + dt : 0;
@@ -1995,7 +2077,8 @@ const clock = new THREE.Clock();
 function loop(){
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, clock.getDelta());
-  if (G.state === 'play' && !G.shop) update(dt);
+  if (G.state === 'play' && (!G.shop || isMP())) update(dt);
+  if (A.ctx && A.ctx.state === 'suspended' && G.state !== 'pause' && G.state !== 'menu' && (G.audioT = (G.audioT || 0) + dt) > 0.5){ G.audioT = 0; A.ctx.resume(); }
   ui(dt);
   renderer.render(scene, camera);
 }
@@ -2055,7 +2138,7 @@ const Pad = {
       if (code === this.tmp){ D.code = code; A.unlock(); this.close(); lockMouse(); intro(); }
       else { this.mode = 'set1'; this.fail('Vzory se neshodují. Začni znovu.'); }
     } else if (code === D.code){
-      D.open = true; this.fails = 0; A.unlock({ x: 0, y: 1.2, z: 3 }); A.creak({ x: 0, y: 1.5, z: 3 }, 0.12);
+      D.open = true; this.fails = 0; send({ t: 'door' }); A.unlock({ x: 0, y: 1.2, z: 3 }); A.creak({ x: 0, y: 1.5, z: 3 }, 0.12);
       this.close(); lockMouse();
     } else {
       this.fails++;
@@ -2107,21 +2190,32 @@ function fixRadio(){
   G.rescue = { t: 180, phase: 'wait', said: {} };
   A.radio({ x: 2.1, y: 1, z: -2.5 }, 5);
   later(1.2, () => A.speak('Tady horská služba. Slyšíme vás. Helikoptéra přiletí za tři minuty. Vydržte.'));
-  showMsg('Záchrana přiletí za 3 minuty. Vydrž.', 5);
+  teamMsg('Záchrana přiletí za 3 minuty. Vydržte.', 5);
   G.spawnT = 3;
 }
 function updateRescue(dt){
-  const r = G.rescue; if (!r) return;
+  const r = G.rescue;
+  if (isClient()){ // druhý hráč jen zobrazuje helikoptéru od hostitele a hlásí, že k ní doběhl
+    if (r && r.phase === 'land'){
+      if (!r.snd) r.snd = A.rotor();
+      heli.userData.rotor.rotation.y += dt * 25;
+      const d = Math.hypot(P.pos.x - heli.position.x, P.pos.z - heli.position.z);
+      r.snd.set(clamp(1 - d / 90, 0.08, 1) * 0.55);
+      if (heli.position.y <= 2.3 && d < 7 && !P.down) win();
+    }
+    return;
+  }
+  if (!r) return;
   if (r.phase === 'wait'){
     r.t -= dt;
     monsters.forEach(m => { m.aggro = Math.max(m.aggro, 1); });
     [[120, 'Ještě dvě minuty.'], [60, 'Minuta. Slyšíš vrtule?'], [30, 'Třicet vteřin.']].forEach(([at, txt]) => {
-      if (r.t <= at && !r.said[at]){ r.said[at] = true; A.radio({ x: 2.1, y: 1, z: -2.5 }, 1.5); showMsg(txt, 3); }
+      if (r.t <= at && !r.said[at]){ r.said[at] = true; A.radio({ x: 2.1, y: 1, z: -2.5 }, 1.5); teamMsg(txt, 3); }
     });
     if (r.t <= 0){
       r.phase = 'land'; r.land = 0; heli.visible = true; heli.position.set(0, 40, -48); heliLight.intensity = 2.6;
       r.snd = A.rotor();
-      showMsg('Helikoptéra přistává na mýtině severně od chaty. BĚŽ!', 6);
+      teamMsg('Helikoptéra přistává na mýtině severně od chaty. BĚŽ!', 6);
       A.speak('Přistáváme na mýtině severně od chaty. Pospěšte si.');
     }
   } else if (r.phase === 'land'){
@@ -2130,14 +2224,17 @@ function updateRescue(dt){
     heli.userData.rotor.rotation.y += dt * 25;
     const d = Math.hypot(P.pos.x - heli.position.x, P.pos.z - heli.position.z);
     r.snd.set(clamp(1 - d / 90, 0.08, 1) * 0.55);
-    if (heli.position.y <= 2.3 && d < 7) win();
+    const dr = NET.remote && !NET.remote.down ? Math.hypot(NET.remote.x - heli.position.x, NET.remote.z - heli.position.z) : 1e9;
+    if (heli.position.y <= 2.3 && ((d < 7 && !P.down) || dr < 7)) win();
     if (r.land > 85){ // nečekají věčně
       r.phase = 'gone'; heli.visible = false; heliLight.intensity = 0; r.snd.set(0);
-      showMsg('Odletěli bez tebe. Rádio ještě funguje…', 5); G.rescue = null;
+      teamMsg('Odletěli bez vás. Rádio ještě funguje…', 5); G.rescue = null;
     }
   }
 }
 function win(){
+  if (G.state === 'won') return;
+  if (isMP()){ send({ t: 'win' }); $('won').querySelector('h1').textContent = 'PŘEŽILI JSTE'; }
   G.state = 'won'; A.chase(0); monsters.forEach(m => m.snd.stop());
   const f = $('fade'); f.style.background = '#e8e4da'; f.style.opacity = 1;
   setTimeout(() => {
@@ -2148,9 +2245,258 @@ function win(){
   }, 2200);
 }
 
+/* ================================================================ MULTIPLAYER */
+// Hra ve dvou přes server na počítači hostitele (node server.js, kamarád otevře http://IP:8080).
+// Hostitel řídí příšery, sbírání věcí, dveře a záchranu; druhý hráč posílá svou polohu a akce
+// a zobrazuje, co mu hostitel pošle. Za dva hráče je víc příšer, mají víc života a je víc zásob.
+const NET = { mode: 'solo', ws: null, remote: null, puppets: new Map(), sendT: 0, nextId: 1, nextPid: 1, sndOut: false, ctxRemote: false, alertT: -9, ready: false };
+const isHost = () => NET.mode === 'host', isClient = () => NET.mode === 'client', isMP = () => NET.mode !== 'solo';
+function send(o){ if (NET.ws && NET.ws.readyState === 1 && isMP()) NET.ws.send(JSON.stringify(o)); }
+function teamMsg(text, dur){ showMsg(text, dur); send({ t: 'msg', text, dur }); }
+const r2 = v => Math.round(v * 100) / 100, r3 = v => Math.round(v * 1000) / 1000;
+const STN = ['stalk', 'prep', 'charge', 'dying'], ST = { stalk: 0, prep: 1, charge: 2, dying: 3 };
+// příšery z pohledu tohoto hráče: u hostitele skutečné, u druhého hráče jejich obrazy od hostitele
+const foes = () => isClient() ? [...NET.puppets.values()] : monsters;
+// zásah příšery u druhého hráče se pošle hostiteli
+const proxy = p => p && (p.proxy || (p.proxy = {
+  pos: p.pos, get state(){ return p.state; },
+  hit: dmg => send({ t: 'hit', id: p.id, dmg }),
+  knock: d => send({ t: 'knock', id: p.id, d }),
+}));
+
+// zvuky a krev, které vzniknou u příšer hostitele, slyší a vidí i druhý hráč
+const hasPos = a => a.some(x => x && typeof x === 'object' && ('x' in x || (x.pos && typeof x.pos === 'object')));
+['shriek', 'hiss', 'monHurt', 'deathWail', 'mstep', 'splat', 'creak', 'snap', 'chop', 'breath', 'whisper'].forEach(k => {
+  const f = A[k];
+  A[k] = function(...a){
+    if (!(isHost() && NET.sndOut && hasPos(a))) return f.apply(this, a);
+    send({ t: 'a', m: k, a });
+    NET.sndOut = false; try { return f.apply(this, a); } finally { NET.sndOut = true; }
+  };
+});
+const BLOOD = { burst: bloodBurst, pool: bloodPool, decal: bloodDecal };
+const netBlood = name => (...a) => {
+  if (!(isHost() && NET.sndOut)) return BLOOD[name](...a);
+  send({ t: 'b', f: name, a });
+  NET.sndOut = false; try { return BLOOD[name](...a); } finally { NET.sndOut = true; }
+};
+bloodBurst = netBlood('burst'); bloodPool = netBlood('pool'); bloodDecal = netBlood('decal');
+['update', 'hit', 'knock'].forEach(k => {
+  const f = Monster.prototype[k];
+  Monster.prototype[k] = function(...a){ const pr = NET.sndOut; NET.sndOut = true; try { return f.apply(this, a); } finally { NET.sndOut = pr; } };
+});
+
+// příšera, která jde po kamarádovi: jeho poloha a pohled se na chvíli podstrčí místo vlastních
+const SAVE = { pos: new THREE.Vector3(), cam: new THREE.Vector3(), fwd: new THREE.Vector3() };
+function asRemote(fn){
+  const r = NET.remote;
+  SAVE.pos.copy(P.pos); SAVE.cam.copy(camera.position); SAVE.fwd.copy(camFwd);
+  const s = { yaw: P.yaw, safe: P.safe, moving: P.moving, speed: P.speed, beam: G.beam, down: P.down };
+  P.pos.set(r.x, 0, r.z); P.yaw = r.yaw; P.safe = r.safe; P.moving = r.moving; P.speed = r.speed; G.beam = r.light; P.down = r.down;
+  camera.position.set(r.x, EYE, r.z);
+  camFwd.set(-Math.sin(r.yaw) * Math.cos(r.pitch), Math.sin(r.pitch), -Math.cos(r.yaw) * Math.cos(r.pitch));
+  NET.ctxRemote = true;
+  try { fn(); } finally {
+    NET.ctxRemote = false;
+    P.pos.copy(SAVE.pos); camera.position.copy(SAVE.cam); camFwd.copy(SAVE.fwd);
+    P.yaw = s.yaw; P.safe = s.safe; P.moving = s.moving; P.speed = s.speed; G.beam = s.beam; P.down = s.down;
+  }
+}
+
+// kamarád: postava v tmavé bundě s vlastní baterkou (světlo je ve scéně od začátku kvůli shaderům)
+const mate = new THREE.Group(); mate.rotation.order = 'YXZ';
+const mateSpot = new THREE.SpotLight(0xffe8c0, 0, 30, 0.5, 0.5, 1);
+{
+  const jacket = new THREE.MeshLambertMaterial({ color: 0x2c3a46, flatShading: true });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x1e1e22 }), skin = new THREE.MeshLambertMaterial({ color: 0x9a8a7a });
+  mate.add(box(0.46, 0.66, 0.26, jacket, 0, 1.2, 0));
+  mate.add(box(0.16, 0.85, 0.18, pants, -0.11, 0.43, 0)); mate.add(box(0.16, 0.85, 0.18, pants, 0.11, 0.43, 0));
+  mate.add(box(0.12, 0.6, 0.14, jacket, -0.3, 1.2, 0)); mate.add(box(0.12, 0.6, 0.14, jacket, 0.3, 1.18, -0.12));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 7), skin); head.position.y = 1.68; mate.add(head);
+  mateSpot.position.set(0.3, 1.45, -0.2); mateSpot.target.position.set(0.3, 1.45, -2);
+  mate.add(mateSpot); mate.add(mateSpot.target); mate.visible = false; scene.add(mate);
+}
+function onRemotePos(a){ // [x, z, yaw, pitch, světlo, v chatě, v bezvědomí, jde, rychlost]
+  const r = NET.remote || (NET.remote = { x: a[0], z: a[1], stepAcc: 0 });
+  r.tx = a[0]; r.tz = a[1]; r.yaw = a[2]; r.pitch = a[3]; r.light = !!a[4]; r.safe = !!a[5]; r.down = !!a[6]; r.moving = !!a[7]; r.speed = a[8];
+}
+function updateMate(dt){
+  const r = NET.remote;
+  if (!r){ mate.visible = false; mateSpot.intensity = 0; return; }
+  const k = Math.min(1, dt * 12), ox = r.x, oz = r.z;
+  r.x += (r.tx - r.x) * k; r.z += (r.tz - r.z) * k;
+  mate.visible = true; mate.position.set(r.x, r.down ? 0.25 : 0, r.z); mate.rotation.set(r.down ? -Math.PI / 2 : 0, r.yaw, 0);
+  mateSpot.intensity = r.light && !r.down ? 3 : 0;
+  mateSpot.target.position.y = 1.45 + Math.tan(clamp(r.pitch, -1, 1)) * 1.8;
+  r.stepAcc += Math.hypot(r.x - ox, r.z - oz);
+  if (r.stepAcc > 1.7){ r.stepAcc = 0; A.mstep({ x: r.x, y: 0.2, z: r.z }, false, 0.5); }
+}
+
+// posílání stavu: druhý hráč posílá jen sebe, hostitel celý svět
+function netTick(dt){
+  if (!isMP() || (NET.sendT -= dt) > 0) return;
+  NET.sendT = isHost() ? 1 / 15 : 1 / 20;
+  const me = [r2(P.pos.x), r2(P.pos.z), r3(P.yaw), r3(P.pitch), G.beam ? 1 : 0, P.safe ? 1 : 0, P.down ? 1 : 0, P.moving ? 1 : 0, r2(P.speed || 0)];
+  if (isClient()){ send({ t: 'p', p: me }); return; }
+  if (!NET.remote) return;
+  send({
+    t: 's', h: me,
+    m: monsters.map(m => [m.id, m.type, r2(m.pos.x), r2(m.pos.z), r2(m.mesh.position.y), r3(m.mesh.rotation.x), r3(m.mesh.rotation.y), r3(m.mesh.rotation.z),
+      ST[m.state] ?? 0, m.special ? 1 : 0, m.parts.chest ? r3(m.parts.chest.rotation.x) : 0, m.rage ? 1 : 0]),
+    f: flares.map(f => f.life > 0 ? [r2(f.mesh.position.x), r2(f.mesh.position.y), r2(f.mesh.position.z), r2(f.life)] : 0),
+    d: D.open ? 1 : 0, parts: P.parts,
+    r: G.rescue ? [G.rescue.phase === 'wait' ? 1 : 2, r2(G.rescue.t), r2(heli.position.y)] : 0,
+  });
+}
+
+// druhý hráč: obrazy příšer podle hostitele
+function onSnapshot(o){
+  onRemotePos(o.h);
+  const seen = new Set();
+  for (const [id, type, x, z, y, rx, ry, rz, st, sp, chest, rage] of o.m){
+    seen.add(id);
+    let p = NET.puppets.get(id);
+    if (!p){
+      const mat = new THREE.MeshLambertMaterial({ color: TYPES[type].color, flatShading: true, emissive: 0x080706 });
+      const parts = buildMonster(type, mat);
+      p = { id, type, t: TYPES[type], parts, mesh: parts.g, pos: new THREE.Vector3(x, 0, z), anim: 0, snd: null, rage: -1, dist: 99 };
+      p.mesh.userData.pid = id; scene.add(p.mesh); NET.puppets.set(id, p);
+    }
+    Object.assign(p, { tx: x, tz: z, y, rx, ry, rz, state: STN[st], special: !!sp, chest });
+    if (p.rage !== rage && p.state !== 'dying'){
+      if (p.snd) p.snd.stop();
+      p.sob = type === 'zena' && !rage;
+      p.snd = p.sob ? A.sobLoop() : A.monsterLoop(p.t.loop, p.t.pitch); p.rage = rage;
+    }
+  }
+  for (const [id, p] of NET.puppets) if (!seen.has(id)){ scene.remove(p.mesh); if (p.snd) p.snd.stop(); NET.puppets.delete(id); }
+  o.f.forEach((f, i) => {
+    const fl = flares[i];
+    if (f){ fl.mesh.visible = true; fl.mesh.position.set(f[0], f[1], f[2]); fl.life = f[3]; }
+    else { fl.mesh.visible = false; fl.life = 0; }
+  });
+  D.open = !!o.d; P.parts = o.parts;
+  if (o.r){
+    G.rescue = G.rescue || { said: {} };
+    G.rescue.phase = o.r[0] === 1 ? 'wait' : 'land'; G.rescue.t = o.r[1];
+    heli.position.set(0, o.r[2], -48); heli.visible = G.rescue.phase === 'land'; heliLight.intensity = heli.visible ? 2.6 : 0;
+  } else if (G.rescue){
+    if (G.rescue.snd) G.rescue.snd.set(0);
+    G.rescue = null; heli.visible = false; heliLight.intensity = 0;
+  }
+}
+function updatePuppets(dt){
+  for (const p of NET.puppets.values()){
+    const k = Math.min(1, dt * 10), ox = p.pos.x, oz = p.pos.z;
+    p.pos.x += (p.tx - p.pos.x) * k; p.pos.z += (p.tz - p.pos.z) * k;
+    p.mesh.position.set(p.pos.x, p.y, p.pos.z); p.mesh.rotation.set(p.rx, p.ry, p.rz);
+    const q = p.parts;
+    if (q.chest) q.chest.rotation.x = p.chest;
+    const sp = Math.hypot(p.pos.x - ox, p.pos.z - oz) / Math.max(dt, 1e-3);
+    if (sp > 0.2 && p.state !== 'dying'){
+      p.anim += dt * sp * 1.7; const w = Math.sin(p.anim) * 0.55;
+      q.legL.rotation.x = q.legL.userData.base + w; q.legR.rotation.x = q.legR.userData.base - w;
+      q.armL.rotation.x = q.armL.userData.base - w * 0.6; q.armR.rotation.x = q.armR.userData.base + w * 0.6;
+    }
+    if (q.eyeM) q.eyeM.color.setHex(p.state === 'prep' || p.state === 'charge' ? 0xff2a10 : 0xd8d2c0);
+    if (q.jaw) q.jaw.rotation.x = 0.55 + (p.state === 'charge' ? 0.35 + Math.sin(G.time * 30) * 0.1 : 0);
+    p.dist = Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z);
+    if (p.state === 'dying' && p.snd){ p.snd.stop(); p.snd = null; }
+    if (p.snd){
+      if (p.sob){ p.snd.tick(dt); p.snd.set(p.pos.x, 1, p.pos.z, 0.9); }
+      else p.snd.set(p.pos.x, 1.4, p.pos.z, p.state === 'charge' ? 1 : p.state === 'prep' ? 0 : p.special ? 0.1 : 0.3);
+    }
+  }
+}
+
+// kamarád odešel nebo spadlo spojení
+function lostPeer(){
+  if (!isMP()) return;
+  NET.remote = null; mate.visible = false; mateSpot.intensity = 0;
+  if (isClient()){ // bez hostitele hraješ dál sám
+    for (const p of NET.puppets.values()){ scene.remove(p.mesh); if (p.snd) p.snd.stop(); }
+    NET.puppets.clear(); NET.mode = 'solo';
+    if (P.down){ P.down = false; die(); return; }
+    showMsg('Spojení s hostitelem se přerušilo. Hraješ dál sám.', 6);
+  } else {
+    if (P.down){ P.down = false; die(); return; }
+    showMsg('Kamarád odešel. Hraješ dál sám.', 5);
+  }
+}
+
+function onNet(o){
+  const R = NET.remote, rp = () => ({ x: R ? R.x : P.pos.x, y: 1.5, z: R ? R.z : P.pos.z });
+  switch (o.t){
+    // lobby
+    case 'role':
+      $('netMsg').textContent = o.role === 'host'
+        ? 'Server běží. Čekám na kamaráda – ať otevře stejnou adresu a klikne na HRÁT VE DVOU.'
+        : 'Připojeno. Čekám na hostitele…';
+      break;
+    case 'joined': // kamarád se připojil k hostiteli
+      if (G.state === 'menu') startGame('host');
+      send({ t: 'init', pk: pickups.map(p => [p.uid, p.kind, r2(p.x), r2(p.z), p.base]) });
+      NET.ready = true; showMsg('Kamarád se připojil.', 3);
+      break;
+    case 'init':
+      pickups.forEach(p => scene.remove(p.mesh)); pickups.length = 0;
+      o.pk.forEach(a => addPickup(a[1], a[2], a[3], a[4], a[0]));
+      NET.ready = true;
+      if (G.state === 'menu') startGame('client');
+      break;
+    case 'left': lostPeer(); break;
+    // poloha a svět
+    case 'p': onRemotePos(o.p); break;
+    case 's': onSnapshot(o); break;
+    // věci
+    case 'take': {
+      const p = removePickup(o.uid); send({ t: 'pr', uid: o.uid });
+      if (p){
+        if (p.kind === 'part'){ P.parts++; showMsg(`Kamarád našel součástku ${P.parts}/4`, 3); }
+        send({ t: 'got', kind: p.kind });
+      }
+      break;
+    }
+    case 'got': applyPickup(o.kind); break;
+    case 'pr': removePickup(o.uid); break;
+    case 'pa': addPickup(o.p[1], o.p[2], o.p[3], o.p[4], o.p[0]); break;
+    // boj (u hostitele)
+    case 'hit': { const m = monsters.find(x => x.id === o.id); if (m) m.hit(o.dmg); break; }
+    case 'knock': { const m = monsters.find(x => x.id === o.id); if (m && R) asRemote(() => m.knock(o.d)); break; }
+    case 'alert': alertMonsters(o.r, o.x, o.z); break;
+    case 'flare': if (isHost()) throwFlareAt(new THREE.Vector3(...o.p), new THREE.Vector3(...o.v)); break;
+    case 'spawn': if (isHost()) spawnAt(o.type, o.x, o.z, o.prepT); break;
+    case 'shot': A.remoteShot(rp(), o.w === 'shotgun'); break;
+    case 'hurt': hurtPlayer(o.n); break;
+    // společné
+    case 'door': if (isHost()){ D.open = true; A.unlock({ x: 0, y: 1.2, z: 3 }); } break;
+    case 'radio': if (isHost() && !G.rescue) fixRadio(); break;
+    case 'revive': P.down = false; P.hp = 35; G.invuln = G.time + 3; G.stress = 0.6; showMsg('Kamarád tě zvedl.', 3); break;
+    case 'over': G.overSent = true; die(); break;
+    case 'win': win(); break;
+    case 'msg': showMsg(o.text, o.dur); break;
+    case 'a': if (typeof A[o.m] === 'function') A[o.m](...o.a); break;
+    case 'b': if (BLOOD[o.f]) BLOOD[o.f](...o.a); break;
+  }
+}
+
+// tlačítko HRÁT VE DVOU je jen u hry spuštěné ze serveru (http://IP:port)
+if (location.protocol === 'http:') $('bDuo').classList.remove('hidden');
+$('bDuo').onclick = () => {
+  $('bDuo').disabled = true; $('netMsg').textContent = 'Připojuji se k serveru…';
+  A.init(); A.ctx.resume();
+  const ws = NET.ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = e => { try { onNet(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+  ws.onclose = () => {
+    if (G.state === 'menu'){ $('netMsg').textContent = 'Nepodařilo se připojit. Server neběží, nebo už hrají dva.'; $('bDuo').disabled = false; }
+    else lostPeer();
+  };
+};
+
 /* ================================================================ INPUT */
 addEventListener('keydown', e => {
   keys[e.code] = true;
+  if (A.ctx && A.ctx.state !== 'running' && G.state === 'play') A.ctx.resume();
   if (G.state !== 'play') return;
   if (G.pad){ if (e.code === 'Escape' && Pad.mode === 'unlock') Pad.close(); return; }
   if (e.code === 'KeyE'){
@@ -2158,7 +2504,7 @@ addEventListener('keydown', e => {
     else if (G.note) toggleNote();
     else if (G.atDoor) Pad.open('unlock');
     else if (G.near){ G.near.read = true; toggleNote(G.near); }
-    else if (G.atRadio) fixRadio();
+    else if (G.atRadio){ if (isClient()) send({ t: 'radio' }); else fixRadio(); }
     else if (G.atBench) openShop();
   }
   if (e.code === 'Escape' && G.shop) closeShop();
@@ -2171,10 +2517,11 @@ addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 // zamčení myši nemusí být dostupné (např. ve vloženém okně) – pak se rozhlíží tažením myši
 function lockMouse(){
-  try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => { G.noLock = true; }); }
-  catch (e) { G.noLock = true; }
+  const fail = () => { if ((G.lockFails = (G.lockFails || 0) + 1) >= 2) G.noLock = true; };
+  try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(fail); }
+  catch (e) { fail(); }
 }
-document.addEventListener('pointerlockerror', () => { G.noLock = true; });
+document.addEventListener('pointerlockerror', () => {});
 addEventListener('mousemove', e => {
   if (G.state !== 'play' || G.shop || G.pad) return;
   if (document.pointerLockElement !== canvas && !(G.noLock && e.buttons)) return;
@@ -2190,16 +2537,26 @@ canvas.addEventListener('mousedown', e => {
 let wasLocked = false;
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
-  if (locked && G.state === 'pause'){ G.state = 'play'; $('pause').classList.add('hidden'); A.ctx.resume(); }
-  if (!locked && wasLocked && G.state === 'play' && !G.shop && !G.pad){ G.state = 'pause'; $('pause').classList.remove('hidden'); A.ctx.suspend(); window.speechSynthesis && speechSynthesis.cancel(); }
+  if (locked){ G.lockFails = 0; $('pause').classList.add('hidden'); }
+  if (locked && G.state === 'pause'){ G.state = 'play'; A.ctx.resume(); }
+  // ve dvou se hra nepozastaví – kamarád hraje dál
+  if (!locked && wasLocked && G.state === 'play' && !G.shop && !G.pad && isMP()) $('pause').classList.remove('hidden');
+  else if (!locked && wasLocked && G.state === 'play' && !G.shop && !G.pad){ G.state = 'pause'; $('pause').classList.remove('hidden'); A.ctx.suspend(); window.speechSynthesis && speechSynthesis.cancel(); }
   wasLocked = locked;
 });
 
-$('bStart').onclick = () => {
+function startGame(mode){
+  NET.mode = mode;
   A.init(); A.ctx.resume(); window.speechSynthesis && speechSynthesis.getVoices();
   $('start').classList.add('hidden');
+  if (mode === 'host'){ // kompenzace za dva hráče: víc zásob
+    for (let i = 0; i < 8; i++){ let p = freeSpot(8); addPickup('bat', p.x, p.z); p = freeSpot(8); addPickup('ammo', p.x, p.z); }
+    for (let i = 0; i < 4; i++){ const p = freeSpot(12); addPickup('shells', p.x, p.z); }
+  }
+  if (mode === 'client') P.pos.set(1.2, 0, -0.6); // vedle hostitele
   G.state = 'play'; Pad.open('set1');
-};
+}
+$('bStart').onclick = () => startGame('solo');
 function intro(){
   later(1, () => showMsg('Rádio mlčí už devátý den.'));
   later(6, () => showMsg('Je rozbité. Chybí v něm čtyři součástky.'));
@@ -2208,7 +2565,10 @@ function intro(){
   later(27, () => showMsg('Brokovnice zůstala ve vraku auta. Někde v lese na západ od chaty.', 5));
 }
 $('bAgain').onclick = () => location.reload();
-$('bResume').onclick = () => lockMouse();
+$('bResume').onclick = () => {
+  if (G.state === 'pause'){ G.state = 'play'; A.ctx.resume(); }
+  $('pause').classList.add('hidden'); lockMouse();
+};
 $('bRestart').onclick = () => location.reload();
 
 /* ================================================================ INIT */
